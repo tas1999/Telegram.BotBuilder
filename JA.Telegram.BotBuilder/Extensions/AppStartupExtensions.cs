@@ -27,7 +27,7 @@ namespace Telegram.BotBuilder.Extensions
             {
                 startAfter = TimeSpan.FromSeconds(2);
             }
-
+            
             var updateManager = new UpdatePollingManager<TBot>(botBuilder, new BotServiceProvider(app), logger);
 
             Task.Delay(startAfter, cancellationToken)

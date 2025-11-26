@@ -30,54 +30,58 @@ namespace Telegram.BotBuilder.Managers
           GetUpdatesRequest? requestParams = null,
           CancellationToken cancellationToken = default)
         {
-            var bot = (TBot)_rootProvider.GetService(typeof(TBot));
-
-            var configuredTaskAwaitable = bot.Client.DeleteWebhookAsync(cancellationToken: cancellationToken)
-                .ConfigureAwait(false);
-            await configuredTaskAwaitable;
-
-            var getUpdatesRequest = requestParams ?? new GetUpdatesRequest()
+            try
             {
-                Offset = 0,
-                Timeout = 500,
-                AllowedUpdates = Array.Empty<UpdateType>()
-            };
+               var bot = (TBot)_rootProvider.GetService(typeof(TBot));
 
-            requestParams = getUpdatesRequest;
-            while (!cancellationToken.IsCancellationRequested)
-            {
-                try
+                var configuredTaskAwaitable = bot.Client.DeleteWebhookAsync(cancellationToken: cancellationToken)
+                    .ConfigureAwait(false);
+                await configuredTaskAwaitable;
+                var getUpdatesRequest = requestParams ?? new GetUpdatesRequest()
                 {
-                    _logger.LogDebug("UpdatePollingManager start while");
-                    var updates = await Policy.Handle<Exception>()
-                        .WaitAndRetryForeverAsync(x => TimeSpan.FromSeconds(10))
-                        .ExecuteAsync(async () => await bot.Client.MakeRequestAsync(requestParams, cancellationToken)
-                        .ConfigureAwait(false));
-                    var updateArray = updates;
-                    _logger.LogDebug("UpdatePollingManager get updateArray count {count}", updateArray?.Count());
-                    foreach (var u in updateArray)
+                    Offset = 0,
+                    Timeout = 500,
+                    AllowedUpdates = Array.Empty<UpdateType>()
+                };
+
+                requestParams = getUpdatesRequest;
+                while (!cancellationToken.IsCancellationRequested)
+                {
+                    try
                     {
-                        using var scopeProvider = _rootProvider.CreateScope();
-                        configuredTaskAwaitable = _updateDelegate(new UpdateContext(bot, u, scopeProvider), cancellationToken)
-                            .ConfigureAwait(false);
-                        await configuredTaskAwaitable;
+                        var updates = await Policy.Handle<Exception>()
+                            .WaitAndRetryForeverAsync(x => TimeSpan.FromSeconds(10))
+                            .ExecuteAsync(async () => await bot.Client.MakeRequestAsync(requestParams, cancellationToken)
+                            .ConfigureAwait(false));
+                        var updateArray = updates;
+                        foreach (var u in updateArray)
+                        {
+                            using var scopeProvider = _rootProvider.CreateScope();
+                            configuredTaskAwaitable = _updateDelegate(new UpdateContext(bot, u, scopeProvider), cancellationToken)
+                                .ConfigureAwait(false);
+                            await configuredTaskAwaitable;
+                        }
+
+                        updateArray = null;
+
+                        if (updates.Length != 0)
+                            requestParams.Offset = updates[^1].Id + 1;
+
+                        updates = null;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Update while polling manager error");
                     }
 
-                    updateArray = null;
-
-                    if (updates.Length != 0)
-                        requestParams.Offset = updates[^1].Id + 1;
-
-                    updates = null;
                 }
-                catch(Exception ex)
-                {
-                    _logger.LogError(ex,"UpdatePollingManager error");
-                }
-                
+
+                cancellationToken.ThrowIfCancellationRequested();
             }
-
-            cancellationToken.ThrowIfCancellationRequested();
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Update polling manager error");
+            }
         }
     }
 }
